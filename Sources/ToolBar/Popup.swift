@@ -52,16 +52,21 @@ struct PopupView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // 输入框常驻，不随状态切换消失
+            TextField("t / db / ip / en / de / u / j", text: $model.input)
+                .textFieldStyle(.plain)
+                .font(.system(size: 22, design: .monospaced))
+                .focused($inputFocused)
+                .onSubmit { model.onSubmit(model.input) }
+                .onChange(of: model.input) { _ in model.autoPasteClipboardIfNeeded() }
+
+            // 回车后在输入框下方下拉展开结果 / 错误
             switch model.state {
             case .input:
-                TextField("t / db / ip / en / de / u / j", text: $model.input)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 22, design: .monospaced))
-                    .focused($inputFocused)
-                    .onSubmit { model.onSubmit(model.input) }
-                    .onChange(of: model.input) { _ in model.autoPasteClipboardIfNeeded() }
+                EmptyView()
 
             case .result(let output):
+                Divider()
                 ScrollView(.vertical) {
                     Text(output.display)
                         .font(.system(
@@ -71,12 +76,14 @@ struct PopupView: View {
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .frame(maxHeight: 280)
                 Text("Copied ✓")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
 
             case .error(let message):
+                Divider()
                 Text(message)
                     .font(.system(size: 20))
                     .foregroundStyle(.red)
@@ -89,14 +96,13 @@ struct PopupView: View {
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+                .strokeBorder(Color.primary.opacity(0.25), lineWidth: 1)
         )
         .onAppear { focusInput() }
         .onChange(of: model.state) { _ in focusInput() }
     }
 
     private func focusInput() {
-        guard case .input = model.state else { return }
         DispatchQueue.main.async {
             inputFocused = true
         }
@@ -114,14 +120,13 @@ final class PopupController {
     private enum Metrics {
         static let width: CGFloat = 600
         static let inputHeight: CGFloat = 88
-        static let errorHeight: CGFloat = 88
-        static let resultHeight: CGFloat = 132
-        static let multilineHeight: CGFloat = 360
+        static let errorHeight: CGFloat = 148
+        static let resultHeight: CGFloat = 200
+        static let multilineHeight: CGFloat = 420
     }
 
     private let panel: PopupPanel
     private let model = PopupModel()
-    private var closeTimer: Timer?
     private var escMonitor: Any?
 
     init() {
@@ -177,8 +182,6 @@ final class PopupController {
     }
 
     func show() {
-        closeTimer?.invalidate()
-        closeTimer = nil
         model.input = ""
         model.state = .input
         resize(height: Metrics.inputHeight, animated: false)
@@ -192,14 +195,12 @@ final class PopupController {
     }
 
     func hide() {
-        closeTimer?.invalidate()
-        closeTimer = nil
         panel.orderOut(nil)
     }
 
     private func execute(_ text: String) {
+        // 空输入直接忽略，对话框保持打开
         guard let result = CommandEngine.execute(text, context: SettingsStore.shared.context) else {
-            hide()
             return
         }
         switch result {
@@ -211,14 +212,6 @@ final class PopupController {
         case .failure(let error):
             model.state = .error(error.message)
             resize(height: Metrics.errorHeight)
-        }
-        scheduleAutoClose()
-    }
-
-    private func scheduleAutoClose() {
-        closeTimer?.invalidate()
-        closeTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
-            self?.hide()
         }
     }
 
