@@ -1,0 +1,245 @@
+import AppKit
+import SwiftUI
+import ToolBarCore
+
+// MARK: - 视图模型
+
+final class PopupModel: ObservableObject {
+    enum State: Equatable {
+        case input
+        case result(CommandOutput)
+        case error(String)
+    }
+
+    @Published var state: State = .input
+    @Published var input: String = ""
+
+    var onSubmit: (String) -> Void = { _ in }
+
+    /// 输入恰好是『已知命令名 + 一个空格、后面没有参数』时，若剪贴板内容符合该命令的参数要求，
+    /// 自动粘贴为参数；已有参数或剪贴板不合适时不动（不覆盖用户输入）。
+    func autoPasteClipboardIfNeeded() {
+        guard input.hasSuffix(" ") else { return }
+        let name = String(input.dropLast())
+        guard CommandEngine.commandNames.contains(name) else { return }
+        guard let clipboard = ClipboardService.read() else { return }
+        let trimmed = clipboard.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard CommandEngine.clipboardFits(command: name, clipboard: trimmed) else { return }
+        input = "\(name) \(trimmed)"
+    }
+}
+
+// MARK: - SwiftUI 视图
+
+struct VisualEffectView: NSViewRepresentable {
+    let material: NSVisualEffectView.Material
+    let blendingMode: NSVisualEffectView.BlendingMode
+
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        return view
+    }
+
+    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+}
+
+struct PopupView: View {
+    @ObservedObject var model: PopupModel
+    @FocusState private var inputFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch model.state {
+            case .input:
+                TextField("t / db / ip / en / de / u / j", text: $model.input)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 22, design: .monospaced))
+                    .focused($inputFocused)
+                    .onSubmit { model.onSubmit(model.input) }
+                    .onChange(of: model.input) { _ in model.autoPasteClipboardIfNeeded() }
+
+            case .result(let output):
+                ScrollView(.vertical) {
+                    Text(output.display)
+                        .font(.system(
+                            size: output.isMultiline ? 13 : 20,
+                            design: output.isMultiline ? .monospaced : .default
+                        ))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Text("Copied ✓")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+
+            case .error(let message):
+                Text(message)
+                    .font(.system(size: 20))
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .frame(width: 560)
+        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.1), lineWidth: 1)
+        )
+        .onAppear { focusInput() }
+        .onChange(of: model.state) { _ in focusInput() }
+    }
+
+    private func focusInput() {
+        guard case .input = model.state else { return }
+        DispatchQueue.main.async {
+            inputFocused = true
+        }
+    }
+}
+
+// MARK: - 浮层窗口（技术方案 3.4）
+
+final class PopupPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { false }
+}
+
+final class PopupController {
+    private enum Metrics {
+        static let width: CGFloat = 600
+        static let inputHeight: CGFloat = 88
+        static let errorHeight: CGFloat = 88
+        static let resultHeight: CGFloat = 132
+        static let multilineHeight: CGFloat = 360
+    }
+
+    private let panel: PopupPanel
+    private let model = PopupModel()
+    private var closeTimer: Timer?
+    private var escMonitor: Any?
+
+    init() {
+        panel = PopupPanel(
+            contentRect: NSRect(x: 0, y: 0, width: Metrics.width, height: Metrics.inputHeight),
+            styleMask: [.borderless, .nonactivatingPanel, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isFloatingPanel = true
+        panel.level = .floating
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.backgroundColor = .clear
+        panel.isOpaque = false
+        panel.hasShadow = true
+        panel.hidesOnDeactivate = false
+        panel.isMovableByWindowBackground = false
+
+        model.onSubmit = { [weak self] text in
+            self?.execute(text)
+        }
+        panel.contentView = NSHostingView(rootView: PopupView(model: model))
+
+        // Esc 立即关闭（PRD 3.8）
+        escMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, self.panel.isVisible, event.keyCode == 53 else { return event }
+            self.hide()
+            return nil
+        }
+
+        // 失焦自动关闭
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.didResignKeyNotification,
+            object: panel,
+            queue: .main
+        ) { [weak self] _ in
+            self?.hide()
+        }
+    }
+
+    deinit {
+        if let escMonitor {
+            NSEvent.removeMonitor(escMonitor)
+        }
+    }
+
+    func toggle() {
+        if panel.isVisible {
+            hide()
+        } else {
+            show()
+        }
+    }
+
+    func show() {
+        closeTimer?.invalidate()
+        closeTimer = nil
+        model.input = ""
+        model.state = .input
+        resize(height: Metrics.inputHeight, animated: false)
+        moveToActiveScreen()
+        if #available(macOS 14.0, *) {
+            NSApp.activate()
+        } else {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        panel.makeKeyAndOrderFront(nil)
+    }
+
+    func hide() {
+        closeTimer?.invalidate()
+        closeTimer = nil
+        panel.orderOut(nil)
+    }
+
+    private func execute(_ text: String) {
+        guard let result = CommandEngine.execute(text, context: SettingsStore.shared.context) else {
+            hide()
+            return
+        }
+        switch result {
+        case .success(let output):
+            // 成功结果才写入剪贴板（PRD 3.8）
+            ClipboardService.copy(output.copyable)
+            model.state = .result(output)
+            resize(height: output.isMultiline ? Metrics.multilineHeight : Metrics.resultHeight)
+        case .failure(let error):
+            model.state = .error(error.message)
+            resize(height: Metrics.errorHeight)
+        }
+        scheduleAutoClose()
+    }
+
+    private func scheduleAutoClose() {
+        closeTimer?.invalidate()
+        closeTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: false) { [weak self] _ in
+            self?.hide()
+        }
+    }
+
+    /// 保持浮层顶边不动，仅调整高度。
+    private func resize(height: CGFloat, animated: Bool = true) {
+        var frame = panel.frame
+        frame.origin.y += frame.size.height - height
+        frame.size = NSSize(width: Metrics.width, height: height)
+        panel.setFrame(frame, display: true, animate: animated)
+    }
+
+    /// 定位到鼠标所在屏幕：水平居中、垂直距顶部约 25%。
+    private func moveToActiveScreen() {
+        let mouseLocation = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouseLocation, $0.frame, false) } ?? NSScreen.main
+        guard let visibleFrame = screen?.visibleFrame else { return }
+        let size = panel.frame.size
+        let origin = NSPoint(
+            x: visibleFrame.midX - size.width / 2,
+            y: visibleFrame.maxY - visibleFrame.height * 0.25 - size.height
+        )
+        panel.setFrameOrigin(origin)
+    }
+}
