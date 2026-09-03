@@ -14,18 +14,26 @@ final class PopupModel: ObservableObject {
     @Published var state: State = .input
     @Published var input: String = ""
 
+    /// 上一次 onChange 时的输入内容，用于判断本次变化是输入还是删除。
+    private var previousInput = ""
+
     var onSubmit: (String) -> Void = { _ in }
 
-    /// 输入恰好是『已知命令名 + 一个空格、后面没有参数』时，若剪贴板内容符合该命令的参数要求，
+    /// 用户刚输入『已知命令名 + 一个空格』（且还没有参数）时，若剪贴板内容符合该命令的参数要求，
     /// 自动粘贴为参数；已有参数或剪贴板不合适时不动（不覆盖用户输入）。
+    /// 仅在用户刚键入空格（输入长度 +1 且以空格结尾）时触发：
+    /// 退格删到『命令 + 空格』不能再次粘贴，否则刚删掉的文本会被回填，退格看似失效。
     func autoPasteClipboardIfNeeded() {
-        guard input.hasSuffix(" ") else { return }
+        let previous = previousInput
+        previousInput = input
+        guard input.count == previous.count + 1, input.hasSuffix(" ") else { return }
         let name = String(input.dropLast())
         guard CommandEngine.commandNames.contains(name) else { return }
         guard let clipboard = ClipboardService.read() else { return }
         let trimmed = clipboard.trimmingCharacters(in: .whitespacesAndNewlines)
         guard CommandEngine.clipboardFits(command: name, clipboard: trimmed) else { return }
         input = "\(name) \(trimmed)"
+        previousInput = input
     }
 }
 
@@ -53,7 +61,7 @@ struct PopupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // 输入框常驻，不随状态切换消失
-            TextField("t / db / ip / en / de / u / j", text: $model.input)
+            TextField("t / l / db / ip / en / de / u / j", text: $model.input)
                 .textFieldStyle(.plain)
                 .font(.system(size: 22, design: .monospaced))
                 .focused($inputFocused)
