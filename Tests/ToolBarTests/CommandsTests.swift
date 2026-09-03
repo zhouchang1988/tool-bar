@@ -46,6 +46,32 @@ final class CommandsTests: XCTestCase {
         XCTAssertEqual(try run("t 2025-08-26").get().display, "1756166400")
     }
 
+    func testTimeEmptyReturnsCurrentTimestamp() throws {
+        let before = Int64(Date().timeIntervalSince1970)
+        let output = try run("t").get()
+        let after = Int64(Date().timeIntervalSince1970)
+        guard let value = Int64(output.display) else {
+            return XCTFail("应输出秒级时间戳，实际: \(output.display)")
+        }
+        XCTAssertTrue((before...after).contains(value))
+    }
+
+    // MARK: l
+
+    func testLengthAscii() throws {
+        XCTAssertEqual(try run("l hello").get().display, "5")
+    }
+
+    func testLengthChinese() throws {
+        // 中文每字按 1 个字符计
+        XCTAssertEqual(try run("l 你好世界").get().display, "4")
+        XCTAssertEqual(try run("l a中b").get().display, "3")
+    }
+
+    func testLengthEmpty() throws {
+        XCTAssertEqual(try run("l").get().display, "0")
+    }
+
     // MARK: db
 
     func testDbPowerOfTwoOutputsHex() throws {

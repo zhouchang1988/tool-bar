@@ -82,6 +82,7 @@ public enum CommandEngine {
 
         switch name {
         case "t": return runTime(argument, context: context)
+        case "l": return runLength(argument)
         case "db": return runDb(argument, context: context)
         case "ip": return runIp(argument)
         case "en": return runUrlEncode(argument)
@@ -93,7 +94,7 @@ public enum CommandEngine {
     }
 
     /// 全部已知命令名。
-    public static let commandNames: Set<String> = ["t", "db", "ip", "en", "de", "u", "j"]
+    public static let commandNames: Set<String> = ["t", "l", "db", "ip", "en", "de", "u", "j"]
 
     /// 校验剪贴板内容是否适合作为某命令的参数（用于输入命令 + 空格时自动粘贴）。
     /// 判据与执行一致：以该内容作为参数执行成功即视为合适；Core 无副作用，可安全调用。
@@ -125,6 +126,11 @@ public enum CommandEngine {
     ]
 
     private static func runTime(_ argument: String, context: CommandContext) -> Result<CommandOutput, CommandError> {
+        // 空参数（直接回车）→ 当前秒级时间戳
+        if argument.isEmpty {
+            return .success(CommandOutput(display: String(Int64(Date().timeIntervalSince1970))))
+        }
+
         // 整数 → 时间字符串（保持单一输出格式）
         if let timestamp = Int64(argument) {
             let formatter = DateFormatter()
@@ -158,6 +164,12 @@ public enum CommandEngine {
         }
 
         return .failure(.invalidTimestamp)
+    }
+
+    // MARK: l —— 字符串长度：按 Character（字形簇）计数，中文每字算 1
+
+    private static func runLength(_ argument: String) -> Result<CommandOutput, CommandError> {
+        .success(CommandOutput(display: String(argument.count)))
     }
 
     // MARK: db —— ID % 分表数；2 的幂输出十六进制，其余十进制（PRD 3.4）
