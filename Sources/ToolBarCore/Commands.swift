@@ -43,7 +43,7 @@ public struct CommandContext {
 }
 
 /// 命令执行结果。`display` 用于浮层展示，`copyable` 写入剪贴板
-/// （如 `db` 展示 `table: 0x40`，剪贴板只写 `0x40`，见 PRD 3.4）。
+/// （如 `db` 展示 `table: 40`，剪贴板只写 `40`，见 PRD 3.4）。
 public struct CommandOutput: Equatable {
     public let display: String
     public let copyable: String
@@ -172,17 +172,42 @@ public enum CommandEngine {
         .success(CommandOutput(display: String(argument.count)))
     }
 
-    // MARK: db —— ID % 分表数；2 的幂输出十六进制，其余十进制（PRD 3.4）
+    // MARK: db —— 分表计算（PRD 3.4）：值 % 分表数；2 的幂输出十六进制，其余十进制。
+    // 值为纯数字时直接取模；非数字（或显式加双引号）按字符串 UTF-8 字节做 CRC32 后再取模。
 
     private static func runDb(_ argument: String, context: CommandContext) -> Result<CommandOutput, CommandError> {
-        let parts = argument.split(whereSeparator: { $0.isWhitespace })
-        guard parts.count == 2,
-              let id = Int64(parts[0]),
-              let count = Int64(parts[1]),
+        // 解析出「值」与「分表数」；值带双引号时强制按字符串处理（引号内允许空格）
+        let valueString: Substring
+        let forcedString: Bool
+        let countString: Substring
+        if argument.hasPrefix("\"") {
+            guard let closeQuote = argument.dropFirst().firstIndex(of: "\"") else {
+                return .failure(.invalidDbArguments)
+            }
+            valueString = argument[argument.index(after: argument.startIndex)..<closeQuote]
+            forcedString = true
+            countString = argument[argument.index(after: closeQuote)...].drop(while: { $0.isWhitespace })
+        } else {
+            guard let separator = argument.firstIndex(where: { $0.isWhitespace }) else {
+                return .failure(.invalidDbArguments)
+            }
+            valueString = argument[..<separator]
+            forcedString = false
+            countString = argument[separator...].drop(while: { $0.isWhitespace })
+        }
+        guard !countString.isEmpty,
+              !countString.contains(where: { $0.isWhitespace }),
+              let count = Int64(countString),
               count > 0 else {
             return .failure(.invalidDbArguments)
         }
-        let value = id % count
+
+        let value: Int64
+        if !forcedString, let id = Int64(valueString) {
+            value = id % count
+        } else {
+            value = Int64(crc32(valueString)) % count
+        }
         let isPowerOfTwo = (count & (count - 1)) == 0
         let formatted: String
         switch context.dbFormat {
@@ -194,6 +219,23 @@ public enum CommandEngine {
             formatted = String(value)
         }
         return .success(CommandOutput(display: "table: \(formatted)", copyable: formatted))
+    }
+
+    /// 标准 CRC-32（IEEE 802.3，与 zlib 一致），对字符串的 UTF-8 字节计算。
+    private static let crc32Table: [UInt32] = (0..<256).map { UInt32($0) }.map { seed in
+        var c = seed
+        for _ in 0..<8 {
+            c = (c & 1) != 0 ? (c >> 1) ^ 0xEDB8_8320 : c >> 1
+        }
+        return c
+    }
+
+    private static func crc32(_ string: Substring) -> UInt32 {
+        var crc: UInt32 = 0xFFFF_FFFF
+        for byte in string.utf8 {
+            crc = (crc >> 8) ^ crc32Table[Int((crc ^ UInt32(byte)) & 0xFF)]
+        }
+        return crc ^ 0xFFFF_FFFF
     }
 
     /// 分表十六进制格式：小写、无 `0x` 前缀，按 `count - 1` 的十六进制位数左侧补 0。

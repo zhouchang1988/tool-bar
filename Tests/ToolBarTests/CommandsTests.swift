@@ -101,10 +101,28 @@ final class CommandsTests: XCTestCase {
         XCTAssertEqual(try run("db 123456 100", dbFormat: .hex).get().copyable, "38")
     }
 
+    func testDbStringUsesCrc32() throws {
+        // 非数字值：对 UTF-8 字节做 CRC32 再取模。crc32("abcdefg") = 824863398
+        XCTAssertEqual(try run("db abcdefg 256").get().copyable, "a6") // 824863398 % 256 = 166
+        XCTAssertEqual(try run("db abcdefg 100").get().copyable, "98")
+        XCTAssertEqual(try run("db abcdefg 7").get().copyable, "2")
+    }
+
+    func testDbQuotedForcesString() throws {
+        // 数字加双引号按字符串处理：crc32("123456") = 158520161，% 256 = 97
+        XCTAssertEqual(try run("db \"123456\" 256").get().copyable, "61")
+        // 不加引号仍是数字取模：123456 % 256 = 64
+        XCTAssertEqual(try run("db 123456 256").get().copyable, "40")
+        // 引号内允许空格：crc32("a b") % 256 = 211
+        XCTAssertEqual(try run("db \"a b\" 256").get().copyable, "d3")
+    }
+
     func testDbInvalid() {
-        XCTAssertEqual(run("db abc 128"), .failure(.invalidDbArguments))
         XCTAssertEqual(run("db 123"), .failure(.invalidDbArguments))
         XCTAssertEqual(run("db 123 0"), .failure(.invalidDbArguments))
+        XCTAssertEqual(run("db 123 abc"), .failure(.invalidDbArguments))
+        XCTAssertEqual(run("db 123 128 extra"), .failure(.invalidDbArguments))
+        XCTAssertEqual(run("db \"abc 128"), .failure(.invalidDbArguments))
         XCTAssertEqual(run("db"), .failure(.invalidDbArguments))
     }
 
@@ -205,8 +223,9 @@ final class CommandsTests: XCTestCase {
 
     func testClipboardFitsDb() {
         XCTAssertTrue(fits("db", "123456 128"))
+        XCTAssertTrue(fits("db", "abcdefg 256"))
         XCTAssertFalse(fits("db", "123456"))
-        XCTAssertFalse(fits("db", "abc 128"))
+        XCTAssertFalse(fits("db", "123 abc"))
     }
 
     func testClipboardFitsIp() {

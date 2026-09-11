@@ -126,10 +126,12 @@ if let ts = Int64(arg) {
 **DbCommand**（规则按 PRD 3.4）
 
 ```swift
-guard let id = Int64(parts[0]), let count = Int64(parts[1]), count > 0 else {
+// 值带双引号 → 强制按字符串（引号内允许空格）；否则按空白切出「值 + 分表数」
+guard let count = Int64(countString), count > 0 else {
     return .failure(.invalidDbArguments)
 }
-let value = id % count
+// 纯数字 → 直接取模；非数字 / 加引号 → 对 UTF-8 字节做标准 CRC-32（zlib）再取模
+let value = isNumeric ? id % count : Int64(crc32(valueString)) % count
 // count 是 2 的幂：(count & (count - 1)) == 0
 let isPowerOfTwo = (count & (count - 1)) == 0
 // 2 的幂 → 小写十六进制、无 0x 前缀，按 count-1 的十六进制位数左侧补 0
@@ -297,6 +299,8 @@ Info.plist 关键配置：
 | `db 123456 128` | `40`（64 的十六进制，2 位补零） |
 | `db 11 16` | `b`（1 位十六进制） |
 | `db 123456 100` | `56`（十进制） |
+| `db abcdefg 256` | `a6`（字符串走 CRC32：824863398 % 256 = 166） |
+| `db "123456" 256` | `61`（引号强制字符串；不加引号直接取模得 `40`） |
 | `ip 10.1.2.3` | `167838211` |
 | `ip 167838211` | `10.1.2.3` |
 | `en https://a.com/a b` | `https%3A%2F%2Fa.com%2Fa%20b` |
