@@ -209,57 +209,6 @@ final class CommandsTests: XCTestCase {
         XCTAssertTrue(output.display.contains(#""a" : "x\"y""#))
     }
 
-    // MARK: clipboardFits（命令 + 空格自动粘贴剪贴板）
-
-    private func fits(_ command: String, _ clipboard: String) -> Bool {
-        CommandEngine.clipboardFits(command: command, clipboard: clipboard)
-    }
-
-    func testClipboardFitsTimestamp() {
-        XCTAssertTrue(fits("t", "1756216800"))
-        XCTAssertTrue(fits("t", "2025-08-26 14:00:00"))
-        XCTAssertFalse(fits("t", "abc"))
-    }
-
-    func testClipboardFitsDb() {
-        XCTAssertTrue(fits("db", "123456 128"))
-        XCTAssertTrue(fits("db", "abcdefg 256"))
-        XCTAssertFalse(fits("db", "123456"))
-        XCTAssertFalse(fits("db", "123 abc"))
-    }
-
-    func testClipboardFitsIp() {
-        XCTAssertTrue(fits("ip", "10.1.2.3"))
-        XCTAssertTrue(fits("ip", "167838211"))
-        XCTAssertFalse(fits("ip", "999.1.1.1"))
-    }
-
-    func testClipboardFitsEncodeDecode() {
-        XCTAssertTrue(fits("en", "https://a.com/a b"))
-        XCTAssertTrue(fits("de", "https%3A%2F%2Fa.com"))
-        XCTAssertFalse(fits("de", "100%"))
-    }
-
-    func testClipboardFitsUrlRequiresQuery() {
-        XCTAssertTrue(fits("u", "https://a.com/a?a=b"))
-        XCTAssertFalse(fits("u", "https://a.com/path"))
-    }
-
-    func testClipboardFitsJson() {
-        XCTAssertTrue(fits("j", "{\"a\":1}"))
-        XCTAssertFalse(fits("j", "{\"a\":"))
-    }
-
-    func testClipboardFitsTrimsAndRejectsEmpty() {
-        XCTAssertTrue(fits("t", "  1756216800\n"))
-        XCTAssertFalse(fits("t", "   "))
-        XCTAssertFalse(fits("t", ""))
-    }
-
-    func testClipboardFitsUnknownCommand() {
-        XCTAssertFalse(fits("xxx", "1756216800"))
-    }
-
     // MARK: 解析
 
     func testUnknownCommand() {

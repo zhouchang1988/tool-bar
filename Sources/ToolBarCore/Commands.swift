@@ -93,23 +93,6 @@ public enum CommandEngine {
         }
     }
 
-    /// 全部已知命令名。
-    public static let commandNames: Set<String> = ["t", "l", "db", "ip", "en", "de", "u", "j"]
-
-    /// 校验剪贴板内容是否适合作为某命令的参数（用于输入命令 + 空格时自动粘贴）。
-    /// 判据与执行一致：以该内容作为参数执行成功即视为合适；Core 无副作用，可安全调用。
-    public static func clipboardFits(
-        command: String,
-        clipboard: String,
-        context: CommandContext = CommandContext()
-    ) -> Bool {
-        let trimmed = clipboard.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, commandNames.contains(command) else { return false }
-        guard let result = execute("\(command) \(trimmed)", context: context) else { return false }
-        if case .success = result { return true }
-        return false
-    }
-
     // MARK: t —— 双向转换（PRD 3.2）：
     // 整数 → 时间字符串（yyyy-MM-dd HH:mm:ss）；时间字符串 → 秒级 Unix 时间戳。
     // 时间字符串支持多种常见格式（列表逐个尝试），兜底用 NSDataDetector 识别自然语言日期。

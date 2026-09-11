@@ -6,9 +6,4 @@ enum ClipboardService {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(string, forType: .string)
     }
-
-    /// 读取剪贴板中的纯文本；非字符串或无内容时返回 nil。
-    static func read() -> String? {
-        NSPasteboard.general.string(forType: .string)
-    }
 }

@@ -14,27 +14,7 @@ final class PopupModel: ObservableObject {
     @Published var state: State = .input
     @Published var input: String = ""
 
-    /// 上一次 onChange 时的输入内容，用于判断本次变化是输入还是删除。
-    private var previousInput = ""
-
     var onSubmit: (String) -> Void = { _ in }
-
-    /// 用户刚输入『已知命令名 + 一个空格』（且还没有参数）时，若剪贴板内容符合该命令的参数要求，
-    /// 自动粘贴为参数；已有参数或剪贴板不合适时不动（不覆盖用户输入）。
-    /// 仅在用户刚键入空格（输入长度 +1 且以空格结尾）时触发：
-    /// 退格删到『命令 + 空格』不能再次粘贴，否则刚删掉的文本会被回填，退格看似失效。
-    func autoPasteClipboardIfNeeded() {
-        let previous = previousInput
-        previousInput = input
-        guard input.count == previous.count + 1, input.hasSuffix(" ") else { return }
-        let name = String(input.dropLast())
-        guard CommandEngine.commandNames.contains(name) else { return }
-        guard let clipboard = ClipboardService.read() else { return }
-        let trimmed = clipboard.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard CommandEngine.clipboardFits(command: name, clipboard: trimmed) else { return }
-        input = "\(name) \(trimmed)"
-        previousInput = input
-    }
 }
 
 // MARK: - SwiftUI 视图
@@ -66,7 +46,6 @@ struct PopupView: View {
                 .font(.system(size: 22, design: .monospaced))
                 .focused($inputFocused)
                 .onSubmit { model.onSubmit(model.input) }
-                .onChange(of: model.input) { _ in model.autoPasteClipboardIfNeeded() }
 
             // 回车后在输入框下方下拉展开结果 / 错误
             switch model.state {
